@@ -15,7 +15,7 @@ def get_files_info(working_directory, directory="."):
             result += "- " + f"{item}: file_size={os.path.getsize(new_path)}, is_dir={os.path.isdir(new_path)}" + "\n"
         return result
     except Exception as e:
-        return f"Error: {e}"
+    return f"Error: {e}"
 
 
 schema_get_files_info = types.FunctionDeclaration(
