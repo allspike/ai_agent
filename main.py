@@ -5,16 +5,53 @@ from dotenv import load_dotenv
 
 from google import genai
 from google.genai import types
-from functions.get_files_info import schema_get_files_info
-from functions.get_file_content import schema_get_file_content
-from functions.run_python import schema_run_python_file
-from functions.write_file import schema_write_file
+from functions.get_files_info import schema_get_files_info, get_files_info
+from functions.get_file_content import schema_get_file_content, get_file_content 
+from functions.run_python import schema_run_python_file, run_python_file
+from functions.write_file import schema_write_file, write_file
 
 def call_function(function_call_part, verbose=False):
+    func_dict = {
+            "get_files_info": get_files_info,
+            "get_file_content": get_file_content,
+            "run_python_file": run_python_file,
+            "write_file": write_file,
+            }
+    if function_call_part.name not in func_dict:
+        return types.Content(
+                role="tool",
+                parts=[
+                    types.Part.from_function_response(
+                        name=function_call_part.name,
+                        response={"error": f"Unknown function: {function_call_part.name}"},
+                        )
+                    ],
+                )
+        
+    kwargs = dict(function_call_part.args)
+    kwargs["working_directory"] = "./calculator"
+
+
     if verbose:
         print(f"Calling function: {function_call_part.name}({function_call_part.args})")
+        
     else:
         print(f" - Calling function: {function_call_part.name}")
+    try:
+        func = func_dict[function_call_part.name]
+        function_result = func(**kwargs)
+    except Exception as e:
+        resp = {"error": str(e)}
+    return types.Content(
+        role="tool",
+        parts=[
+            types.Part.from_function_response(
+                name=function_call_part.name,
+                response={"result": function_result}
+                )
+            ]
+        )
+
     
 
 def main():
@@ -51,7 +88,9 @@ def main():
     ]
 
     response = client.models.generate_content(model="gemini-2.0-flash-001", contents = messages, config=types.GenerateContentConfig(tools=[available_functions], system_instruction=system_prompt))
+    verbose = False
     if "--verbose" in args:
+        verbose = True
         print(f'User prompt: {user_prompt}')
         print(f'Prompt tokens: {response.usage_metadata.prompt_token_count}')
         print(f'Response tokens: {response.usage_metadata.candidates_token_count}')
@@ -59,7 +98,16 @@ def main():
     f_calls = response.function_calls
     if f_calls != None:
         for fun in f_calls:
-            print(f'Calling function: {fun.name}({fun.args})')
+            try: 
+                result = call_function(fun, verbose) 
+                parts = result.parts
+                fr = getattr(parts[0], "function_response", None) if parts else None
+                if not fr or not hasattr(fr, "response"):
+                    raise RunetimeError("Missing function response in tool content")
+                if verbose: 
+                    print(f"-> {fr.response}")
+            except Exception:
+                print("Fatal error! Exiting...")
     else:
         print(response.text)
 

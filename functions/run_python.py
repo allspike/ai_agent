@@ -26,8 +26,16 @@ def run_python_file(working_directory, file_path, fargs=[]):
             # our result string that starts empty
             res_str = ""
             # run the subprocess.run method
-            # this produces a Completed Process instance
-            result = subprocess.run(args=["python", file_path] + fargs, timeout=30, cwd=os.path.abspath(working_directory), capture_output=True, text=True)
+            if fargs is None:
+                fargs = []
+            elif isinstance(fargs, str):
+                fargs = fargs.split()
+            elif not isinstance(fargs, list):
+                fargs = [str(fargs)]
+            cmd = ["python", file_path]
+            cmd += fargs
+
+            result = subprocess.run(cmd, timeout=30, cwd=os.path.abspath(working_directory), capture_output=True, text=True)
             # if both stdout and stderr are empty exit the function and return the string that says nothing was produced
             if len(result.stdout) == 0 and len(result.stderr) == 0:
                 return 'No output produced'
