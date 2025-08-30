@@ -29,7 +29,7 @@ def call_function(function_call_part, verbose=False):
                 )
         
     kwargs = dict(function_call_part.args)
-    kwargs["working_directory"] = "./calculator"
+    kwargs["working_directory"] = "./calculator/pkg"
 
 
     if verbose:
@@ -41,7 +41,15 @@ def call_function(function_call_part, verbose=False):
         func = func_dict[function_call_part.name]
         function_result = func(**kwargs)
     except Exception as e:
-        resp = {"error": str(e)}
+        return types.Content(
+                role="tool",
+                parts=[
+                    types.Part.from_function_response(
+                        name=function_call_part.name,
+                        response={"error": f"{e}"},
+                        )
+                    ],
+                )
     return types.Content(
         role="tool",
         parts=[
@@ -87,29 +95,53 @@ def main():
         types.Content(role="user", parts=[types.Part(text=user_prompt)])
     ]
 
-    response = client.models.generate_content(model="gemini-2.0-flash-001", contents = messages, config=types.GenerateContentConfig(tools=[available_functions], system_instruction=system_prompt))
-    verbose = False
-    if "--verbose" in args:
-        verbose = True
-        print(f'User prompt: {user_prompt}')
-        print(f'Prompt tokens: {response.usage_metadata.prompt_token_count}')
-        print(f'Response tokens: {response.usage_metadata.candidates_token_count}')
-        print('Response:')
-    f_calls = response.function_calls
-    if f_calls != None:
-        for fun in f_calls:
-            try: 
-                result = call_function(fun, verbose) 
-                parts = result.parts
-                fr = getattr(parts[0], "function_response", None) if parts else None
-                if not fr or not hasattr(fr, "response"):
-                    raise RunetimeError("Missing function response in tool content")
-                if verbose: 
-                    print(f"-> {fr.response}")
-            except Exception:
-                print("Fatal error! Exiting...")
-    else:
-        print(response.text)
-
+    counter = 0
+    while counter < 20:
+        try:
+            response = client.models.generate_content(model="gemini-2.0-flash-001", contents = messages, config=types.GenerateContentConfig(tools=[available_functions], system_instruction=system_prompt))
+        except Exception as e:
+            print(f'Error: {e}')
+        counter += 1
+       
+        verbose = False
+        if "--verbose" in args:
+            verbose = True
+            print(f'User prompt: {user_prompt}')
+            print(f'Prompt tokens: {response.usage_metadata.prompt_token_count}')
+            print(f'Response tokens: {response.usage_metadata.candidates_token_count}')
+            print('Response:')
+        found_call = False
+        for candidate in response.candidates:
+            if not getattr(candidate, "content", None):
+                continue
+            messages.append(candidate.content)
+            parts = getattr(candidate.content, "parts", None)
+            if not parts:
+                continue
+            for part in parts:
+                try:
+                    fc = getattr(part, "function_call", None)
+                    if not fc:
+                       continue 
+                    found_call = True
+                    result = call_function(fc, verbose)
+                    tool_part = result.parts[0].function_response
+                    messages.append(
+                            types.Content(
+                                role="user",
+                                parts = [
+                                    types.Part.from_function_response(
+                                        name=tool_part.name,
+                                        response=tool_part.response,
+                                        )
+                                    ],
+                                )
+                            )
+                except Exception as e:
+                    print(f"Fatal Error! {e}")
+        if not found_call and response.text:
+            print("Final Response:")
+            print(response.text)
+            break
 if __name__ == "__main__":
     main()
